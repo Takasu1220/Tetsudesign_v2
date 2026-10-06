@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>画像組み合わせツール Pro</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f5f7fb;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 { color: #333; margin-bottom: 20px; }
+
+        /* 全体レイアウト */
+        .app-container {
+            display: flex;
+            gap: 20px;
+            max-width: 1100px;
+            width: 100%;
+        }
+
+        /* 左側：画像選択パレット */
+        .palette {
+            width: 240px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        .palette h3 { margin-top: 0; color: #444; border-bottom: 20px; }
+        .image-list {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        .palette-img {
+            width: 100%;
+            height: 90px;
+            object-fit: cover;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: transform 0.1s, border-color 0.2s;
+        }
+        .palette-img:hover {
+            transform: scale(1.05);
+            border-color: #4f46e5;
+        }
+
+        /* 右側：メイン操作エリア */
+        .main-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        /* コントロールボタン */
+        .controls {
+            background: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            display: flex;
+            gap: 12px;
+        }
+        button {
+            padding: 10px 18px;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            border: none;
+            transition: opacity 0.2s;
+        }
+        button:hover { opacity: 0.9; }
+        .download-btn { background-color: #10b981; color: white; }
+        .clear-btn { background-color: #ef4444; color: white; }
+        .delete-btn { background-color: #6b7280; color: white; display: none; }
+
+        /* キャンバス */
+        #canvas {
+            width: 800px;
+            height: 600px;
+            background-color: #ffffff;
+            border: 2px dashed #cbd5e1;
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        /* 配置される画像のラッパー（リサイズ枠） */
+        .image-wrapper {
+            position: absolute;
+            cursor: move;
+            padding: 1px;
+            border: 1px solid transparent;
+            box-sizing: border-box;
+        }
+        /* 選択中のスタイル */
+        .image-wrapper.selected {
+            border: 1px dashed #4f46e5;
+        }
+
+        .placed-image {
+            width: 100%;
+            height: 100%;
+            display: block;
+            pointer-events: none; /* 画像自体ではなくラッパーでドラッグを検知 */
+        }
+
+        /* リサイズ用のつまみ（右下） */
+        .resize-handle {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background-color: #4f46e5;
+            bottom: -6px;
+            right: -6px;
+            cursor: se-resize;
+            border-radius: 50%;
+            display: none;
+            z-index: 10;
+        }
+        .image-wrapper.selected .resize-handle {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>画像組み合わせツール Pro</h1>
+
+    <div class="app-container">
+        <!-- 左側：用意した画像リスト -->
+        <div class="palette">
+            <h3>画像リスト</h3>
+            <div class="image-list">
+                <!-- ここに用意したい画像のパスをセットします -->
+                <img src="https://picsum.photos/id/1011/300/200" class="palette-img" alt="画像1">
+                <img src="https://picsum.photos/id/1025/300/200" class="palette-img" alt="画像2">
+                <img src="https://picsum.photos/id/1062/300/200" class="palette-img" alt="画像3">
+                <img src="https://picsum.photos/id/1069/300/200" class="palette-img" alt="画像4">
+            </div>
+        </div>
+
+        <!-- 右側：キャンバスと操作ボタン -->
+        <div class="main-area">
+            <div class="controls">
+                <button class="download-btn" id="downloadCanvas">一枚にしてダウンロード</button>
+                <button class="delete-btn" id="deleteImage">選択中の画像を削除</button>
+                <button class="clear-btn" id="clearCanvas">全消去</button>
+            </div>
+            <div id="canvas"></div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const downloadBtn = document.getElementById('downloadCanvas');
+        const clearCanvas = document.getElementById('clearCanvas');
+        const deleteBtn = document.getElementById('deleteImage');
+        const paletteImages = document.querySelectorAll('.palette-img');
+        
+        let selectedElement = null;
+
+        // 1. 用意された画像をクリックしたらキャンバスに追加
+        paletteImages.forEach(img => {
+            img.addEventListener('click', function() {
+                createImageWrapper(this.src);
+            });
+        });
+
+        // 画像ラッパー（移動・リサイズ用コンテナ）の生成
+        function createImageWrapper(src) {
+            const wrapper = document.createElement('div');
+            wrapper.classList.add('image-wrapper');
+            wrapper.style.left = '100px';
+            wrapper.style.top = '100px';
+            wrapper.style.width = '150px';   // 初期サイズ
+            wrapper.style.height = '100px';  // 初期サイズ
+
+            const img = document.createElement('img');
+            img.src = src;
+            img.classList.add('placed-image');
+
+            const handle = document.createElement('div');
+            handle.classList.add('resize-handle');
+
+            wrapper.appendChild(img);
+            wrapper.appendChild(handle);
+            canvas.appendChild(wrapper);
+
+            // 各種イベントの設定
+            setupDragAndResize(wrapper, handle);
+            selectElement(wrapper);
+        }
+
+        // 2. ドラッグ＆ドロップ ＆ 自由引き伸ばしリサイズ機能
+        function setupDragAndResize(wrapper, handle) {
+            let isDragging = false;
+            let isResizing = false;
+            let startX, startY, startWidth, startHeight, startLeft, startTop;
+
+            // 要素をクリックしたとき（選択と最前面移動）
+            wrapper.addEventListener('mousedown', function(e) {
+                if (e.target === handle) return; // リサイズつまみならスキップ
+                isDragging = true;
+                selectElement(wrapper);
+                
+                startX = e.clientX;
+                startY = e.clientY;
+                startLeft = wrapper.offsetLeft;
+                startTop = wrapper.offsetTop;
+                
+                canvas.appendChild(wrapper); // 最前面へ
+                e.preventDefault();
+            });
+
+            // リサイズつまみを掴んだとき
+            handle.addEventListener('mousedown', function(e) {
+                isResizing = true;
+                selectElement(wrapper);
+                
+                startX = e.clientX;
+                startY = e.clientY;
+                startWidth = wrapper.clientWidth;
+                startHeight = wrapper.clientHeight;
+                
+                e.preventDefault();
+                e.stopPropagation(); // ドラッグイベントの発生を防ぐ
+            });
+
+            // マウスが動いたときの共通処理
+            document.addEventListener('mousemove', function(e) {
+                if (isDragging) {
+                    const dx = e.clientX - startX;
+                    const dy = e.clientY - startY;
+                    wrapper.style.left = (startLeft + dx) + 'px';
+                    wrapper.style.top = (startTop + dy) + 'px';
+                }
+                
+                if (isResizing) {
+                    const dx = e.clientX - startX;
+                    const dy = e.clientY - startY;
+                    // 縦横の制限なく自由に引き伸ばし可能
+                    wrapper.style.width = Math.max(20, startWidth + dx) + 'px';
+                    wrapper.style.height = Math.max(20, startHeight + dy) + 'px';
+                }
+            });
+
+            // マウスを離したとき
+            document.addEventListener('mouseup', function() {
+                isDragging = false;
+                isResizing = false;
+            });
+        }
+
+        // 要素を選択状態にする
+        function selectElement(el) {
+            if (selectedElement) {
+                selectedElement.classList.remove('selected');
+            }
+            selectedElement = el;
+            if (selectedElement) {
+                selectedElement.classList.add('selected');
+                deleteBtn.style.display = 'block';
+            } else {
+                deleteBtn.style.display = 'none';
+            }
+        }
+
+        // キャンバスの空白部分をクリックしたら選択解除
+        canvas.addEventListener('mousedown', function(e) {
+            if (e.target === canvas) {
+                selectElement(null);
+            }
+        });
+
+        // 選択中画像の削除
+        deleteBtn.addEventListener('click', function() {
+            if (selectedElement) {
+                selectedElement.remove();
+                selectElement(null);
+            }
+        });
+
+        // 全消去
+        clearCanvas.addEventListener('click', function() {
+            canvas.innerHTML = '';
+            selectElement(null);
+        });
+
+        // 3. 一枚の画像にしてダウンロード（HTML5 Canvasを使用）
+        downloadBtn.addEventListener('click', function() {
+            const wrappers = canvas.querySelectorAll('.image-wrapper');
+            if (wrappers.length === 0) {
+                alert('キャンバスに画像がありません');
+                return;
+            }
+
+            const exportCanvas = document.createElement('canvas');
+            exportCanvas.width = canvas.clientWidth;
+            exportCanvas.height = canvas.clientHeight;
+            const ctx = exportCanvas.getContext('2d');
+
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+
+            const promises = [];
+
+            wrappers.forEach(wrapper => {
+                const img = wrapper.querySelector('.placed-image');
+                const left = wrapper.offsetLeft;
+                const top = wrapper.offsetTop;
+                const width = wrapper.clientWidth;
+                const height = wrapper.clientHeight;
+
+                const tempImg = new Image();
+                tempImg.crossOrigin = 'anonymous';
+                tempImg.src = img.src;
+
+                const promise = new Promise((resolve) => {
+                    tempImg.onload = function() {
+                        ctx.drawImage(tempImg, left, top, width, height);
+                        resolve();
+                    };
+                    tempImg.onerror = resolve;
+                });
+                promises.push(promise);
+            });
+
+            Promise.all(promises).then(() => {
+                const link = document.createElement('a');
+                link.download = 'combined-image.png';
+                link.href = exportCanvas.toDataURL('image/png');
+                link.click();
+            });
+        });
+    </script>
+</body>
+</html>
